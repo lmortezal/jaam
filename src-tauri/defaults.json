@@ -1,0 +1,325 @@
+{
+  "version": 1,
+  "revision": 0,
+  "environments": [],
+  "component_types": [
+    {
+      "id": "server",
+      "name": "Server",
+      "icon": "server",
+      "color": "#8d94ff",
+      "fields": [
+        {
+          "key": "hostname",
+          "label": "Hostname / IP",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "ssh_user",
+          "label": "SSH user",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "ssh_port",
+          "label": "SSH port",
+          "field_type": "number",
+          "options": []
+        },
+        {
+          "key": "ssh_identity_file",
+          "label": "Identity file path",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "os_version",
+          "label": "OS version",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": {
+        "action_type": "ssh_terminal",
+        "template": "ssh {hostname}"
+      }
+    },
+    {
+      "id": "domain",
+      "name": "Domain",
+      "icon": "globe",
+      "color": "#63cfbd",
+      "fields": [
+        {
+          "key": "url",
+          "label": "URL",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "hostname",
+          "label": "Domain name",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": {
+        "action_type": "open_url",
+        "template": "{url}"
+      }
+    },
+    {
+      "id": "dns",
+      "name": "DNS Record",
+      "icon": "network",
+      "color": "#e7bd71",
+      "fields": [
+        {
+          "key": "hostname",
+          "label": "Record name",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "record_type",
+          "label": "Record type",
+          "field_type": "enum",
+          "options": ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV"]
+        },
+        {
+          "key": "value",
+          "label": "Value",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": null
+    },
+    {
+      "id": "loadbalancer",
+      "name": "Load Balancer",
+      "icon": "network",
+      "color": "#ec9dca",
+      "fields": [
+        {
+          "key": "hostname",
+          "label": "Hostname / IP",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "version",
+          "label": "Version",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "url",
+          "label": "Management URL",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": {
+        "action_type": "open_url",
+        "template": "{url}"
+      }
+    },
+    {
+      "id": "kubernetes",
+      "name": "Kubernetes",
+      "icon": "boxes",
+      "color": "#79b4fb",
+      "fields": [
+        {
+          "key": "kube_context",
+          "label": "Context",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "hostname",
+          "label": "API server",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "version",
+          "label": "Version",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": null
+    },
+    {
+      "id": "database",
+      "name": "Database",
+      "icon": "database",
+      "color": "#d4aaec",
+      "fields": [
+        {
+          "key": "hostname",
+          "label": "Hostname / IP",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "engine",
+          "label": "Engine",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "version",
+          "label": "Version",
+          "field_type": "text",
+          "options": []
+        },
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": null
+    },
+    {
+      "id": "custom",
+      "name": "Custom",
+      "icon": "box",
+      "color": "#a0a9b7",
+      "fields": [
+        {
+          "key": "criticality",
+          "label": "Criticality",
+          "field_type": "enum",
+          "options": ["low", "medium", "high"]
+        },
+        {
+          "key": "internet_facing",
+          "label": "Internet-facing",
+          "field_type": "bool",
+          "options": []
+        },
+        {
+          "key": "notes",
+          "label": "Notes",
+          "field_type": "text",
+          "options": []
+        }
+      ],
+      "launch_action": null
+    }
+  ],
+  "components": [],
+  "relationships": [],
+  "settings": {
+    "auto_lock_minutes": 15,
+    "terminal": "auto"
+  }
+}

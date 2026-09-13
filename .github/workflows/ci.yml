@@ -1,0 +1,36 @@
+name: Verify
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libdbus-1-dev libssl-dev
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm run test:native -- --locked
+      - name: Browser workflow tests
+        if: runner.os == 'Linux'
+        run: |
+          npm exec -- playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: npm run bundle -- --bundles app -- --locked
+      - name: Package Linux deb
+        if: runner.os == 'Linux'
+        run: npm run bundle -- --bundles deb -- --locked

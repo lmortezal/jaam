@@ -1,0 +1,59 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "OpsPortal",
+  "version": "0.1.0",
+  "identifier": "dev.opsportal.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OpsPortal",
+        "width": 1440,
+        "height": 940,
+        "minWidth": 960,
+        "minHeight": 640
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+      "capabilities": [
+        {
+          "identifier": "main",
+          "windows": ["main"],
+          "permissions": ["core:event:default"]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.icns"],
+    "category": "DeveloperTool",
+    "shortDescription": "Your private infrastructure map",
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "infoPlist": "Info.plist",
+      "signingIdentity": "-"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["policykit-1", "gnome-keyring"],
+        "files": {
+          "/usr/share/polkit-1/actions/dev.opsportal.unlock.policy": "linux/dev.opsportal.unlock.policy"
+        }
+      },
+      "rpm": {
+        "depends": ["polkit", "gnome-keyring"],
+        "files": {
+          "/usr/share/polkit-1/actions/dev.opsportal.unlock.policy": "linux/dev.opsportal.unlock.policy"
+        }
+      }
+    }
+  }
+}

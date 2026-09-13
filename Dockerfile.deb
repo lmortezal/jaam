@@ -1,0 +1,47 @@
+FROM --platform=linux/amd64 ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    build-essential \
+    pkg-config \
+    libwebkit2gtk-4.1-dev \
+    libappindicator3-dev \
+    librsvg2-dev \
+    patchelf \
+    libdbus-1-dev \
+    libssl-dev \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust stable
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+# Copy dependencies
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy source code
+COPY tsconfig.json vite.config.ts index.html ./
+COPY src/ ./src/
+COPY assets/ ./assets/
+COPY src-tauri/ ./src-tauri/
+
+# Clean any existing build artifacts from host
+RUN rm -rf src-tauri/target dist
+
+# Build Linux .deb bundle
+RUN npm exec -- tauri build --bundles deb
+
+FROM scratch
+COPY --from=builder /app/src-tauri/target/release/bundle/deb/*.deb /

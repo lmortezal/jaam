@@ -1,0 +1,41 @@
+{
+  "name": "opsportal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "demo": "vite --mode demo --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "tauri": "tauri",
+    "desktop": "sh scripts/desktop.sh dev",
+    "bundle": "sh scripts/desktop.sh build",
+    "test:native": "sh scripts/rust.sh test --manifest-path src-tauri/Cargo.toml",
+    "test:e2e": "playwright test",
+    "format": "prettier --write src tests *.ts *.json index.html src-tauri/*.json"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "cytoscape": "^3.33.1",
+    "cytoscape-dagre": "^2.5.0",
+    "lucide-react": "^0.577.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "yaml": "^2.8.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tauri-apps/cli": "^2.10.1",
+    "@types/cytoscape": "^3.31.0",
+    "@types/cytoscape-dagre": "^2.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.4",
+    "prettier": "^3.9.6",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

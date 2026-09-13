@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dist-demo/
+src-tauri/target/
+.toolchain/
+.DS_Store
+*.log
+test-results/
+src-tauri/gen/
+*.tsbuildinfo
