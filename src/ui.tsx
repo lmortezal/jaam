@@ -1,15 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import {
-  Box,
-  Boxes,
-  Building2,
-  Database,
-  FlaskConical,
-  Globe2,
-  Network,
-  Server,
-  X,
-} from "lucide-react";
+import { X } from "lucide-react";
+import { iconMarkup } from "./nodeIcons";
 export function Icon({
   name,
   size = 18,
@@ -19,20 +10,7 @@ export function Icon({
   size?: number;
   className?: string;
 }) {
-  const I =
-    (
-      {
-        server: Server,
-        globe: Globe2,
-        network: Network,
-        boxes: Boxes,
-        database: Database,
-        building: Building2,
-        flask: FlaskConical,
-        box: Box,
-      } as Record<string, typeof Box>
-    )[name || "box"] || Box;
-  return <I size={size} {...props} />;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props} dangerouslySetInnerHTML={{ __html: iconMarkup(name || "box") }} />;
 }
 export function Modal({
   title,

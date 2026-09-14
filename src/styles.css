@@ -1,6 +1,5 @@
 :root {
   font-family:
-    Inter,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
@@ -19,6 +18,14 @@
   --muted: #888a9e;
   --accent: #b6a2f4;
   --text: #e7e7ee;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --radius: 8px;
+  --selection: #302a48;
+  --selection-border: #d1c4ff;
+  --font-small: 11px;
+  --control-size: 32px;
 }
 * {
   box-sizing: border-box;
@@ -493,7 +500,7 @@ kbd {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 15px;
+  gap: var(--space-md);
   margin-bottom: 37px;
 }
 .stat-card {
@@ -905,7 +912,8 @@ tbody tr:hover {
   background: #20212c;
 }
 .selected-row {
-  background: #282334 !important;
+  background: var(--selection) !important;
+  box-shadow: inset 3px 0 var(--selection-border);
 }
 .component-name {
   text-align: left;
@@ -919,7 +927,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--radius);
   flex: none;
 }
 .component-name strong {
@@ -985,8 +993,8 @@ tbody tr:hover {
   font-size: 9px;
 }
 .row-launch {
-  width: 27px;
-  height: 27px;
+  width: var(--control-size);
+  height: var(--control-size);
   background: #252733;
   border: 1px solid #353745;
   border-radius: 5px;
@@ -1108,7 +1116,7 @@ tbody tr:hover {
   font-size: 8px;
 }
 .detail-scroll {
-  padding: 23px;
+  padding: var(--space-lg);
   overflow: auto;
   flex: 1;
 }
@@ -2011,3 +2019,26 @@ tbody tr:hover {
     scroll-behavior: auto !important;
   }
 }
+
+button > svg, .type-icon > svg, .environment-icon > svg { flex: none; }
+.component-name > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.criticality.not.set { color: var(--muted); }
+.modal form > p { margin-bottom: var(--space-md); }
+
+.graph-actions { position: absolute; top: 12px; left: 12px; display: flex; gap: 8px; }
+.diagram-save { position: absolute; right: 12px; top: 12px; max-width: 40%; font-size: 11px; padding: 7px; background: var(--bg); border-radius: var(--radius); }
+.diagram-save button { color: var(--accent); }
+
+.selection-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-sm); padding: var(--space-md); margin-bottom: var(--space-md); background: var(--selection); border: 1px solid var(--selection-border); border-radius: var(--radius); }
+.selection-toolbar > span { font-size: var(--font-small); color: var(--muted); }
+.bulk-field { display: grid; grid-template-columns: 1.2fr 150px 1fr; gap: var(--space-sm); align-items: start; margin: var(--space-md) 0; }
+.bulk-field label { margin: 0; }
+.bulk-preview { max-height: 280px; overflow: auto; margin-top: var(--space-md); }
+.bulk-preview td { overflow-wrap: anywhere; max-width: 220px; white-space: pre-wrap; }
+.focused-row { box-shadow: inset 3px 0 var(--accent); }
+
+.group-members { max-height: 220px; overflow: auto; margin-top: var(--space-md); }
+.modal label.group-member { flex-direction: row; align-items: center; margin-bottom: 10px; }
+.graph-actions { max-width: 75%; flex-wrap: wrap; z-index: 2; }
+.graph-actions select { width: 145px; }
+.group-resize { position: absolute; width: 20px; height: 20px; border-right: 4px solid var(--selection-border); border-bottom: 4px solid var(--selection-border); cursor: nwse-resize; touch-action: none; }

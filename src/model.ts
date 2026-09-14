@@ -1,4 +1,5 @@
 import defaults from "../src-tauri/defaults.json";
+import { shortLabel } from "./visual";
 import { nodeIcon } from "./nodeIcons";
 export type Properties = Record<string, string | number | boolean | null>;
 export interface Environment {
@@ -51,7 +52,11 @@ export interface Inventory {
   components: Component[];
   relationships: Relationship[];
   settings: { auto_lock_minutes: number; terminal: string };
+  diagram_views: Record<string, DiagramView>;
 }
+export interface NodePosition { x: number; y: number; locked: boolean }
+export interface DiagramGroup { id: string; name: string; members: string[]; x: number; y: number; width: number; height: number }
+export interface DiagramView { nodes: Record<string, NodePosition>; groups: DiagramGroup[] }
 export interface Suggestion {
   id: string;
   source: string;
@@ -85,7 +90,7 @@ export const versionOf = (c: Component) =>
       "",
   );
 export const criticalityOf = (c: Component) =>
-  String(c.properties.criticality || "low");
+  String(c.properties.criticality || "not set");
 export function removeComponent(d: Inventory, id: string): Inventory {
   return {
     ...d,
@@ -180,7 +185,7 @@ export function graphElements(d: Inventory, env: string, filters: Filters) {
           (e) => e.id === c.environment_id,
         )?.name;
         const badges = [
-          c.properties.internet_facing === true ? "↗ PUBLIC" : "",
+          c.properties.internet_facing === true ? "↗ PUBLIC" : c.properties.internet_facing === false ? "PRIVATE" : "EXPOSURE NOT SET",
           `● ${criticalityOf(c).toUpperCase()}`,
         ]
           .filter(Boolean)
@@ -188,7 +193,7 @@ export function graphElements(d: Inventory, env: string, filters: Filters) {
         return {
           data: {
             id: c.id,
-            label: `${c.name}\n${t?.name || "Component"}${versionOf(c) ? ` · ${versionOf(c)}` : ""}\n${badges}${external ? `\n↗ ${envName}` : ""}`,
+            label: `${shortLabel(c.name)}\n${shortLabel(`${t?.name || "Component"}${versionOf(c) ? ` · ${versionOf(c)}` : ""}`)}\n${badges}${external ? `\n↗ ${shortLabel(envName || "Environment")}` : ""}`,
             color: t?.color || "#9a9db5",
             icon: nodeIcon(t?.icon || "box", t?.color || "#9a9db5"),
             environment: c.environment_id,
@@ -218,9 +223,12 @@ export function graphElements(d: Inventory, env: string, filters: Filters) {
 export function parseBackup(value: unknown): Inventory {
   if (!value || typeof value !== "object")
     throw new Error("Expected an inventory object.");
-  const d = value as Inventory;
+  const d = structuredClone(value) as Inventory;
+  if (d.version === 1) d.version = 2;
+  d.diagram_views ??= {};
+  for (const view of Object.values(d.diagram_views)) view.groups ??= [];
   if (
-    d.version !== 1 ||
+    d.version !== 2 ||
     !["environments", "components", "component_types", "relationships"].every(
       (k) => Array.isArray((d as unknown as Record<string, unknown>)[k]),
     ) ||

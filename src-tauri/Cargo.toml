@@ -19,6 +19,7 @@ zeroize = "1"
 url = "2"
 shlex = "1"
 libc = "0.2"
+age = { version = "0.11", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6.3", features = ["apple-native"] }

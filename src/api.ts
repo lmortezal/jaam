@@ -2,6 +2,14 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Inventory, Scan } from "./model";
 export const native = isTauri();
+export async function exportBackup(password: string): Promise<number[]> {
+  if (!native) throw new Error("Encrypted backups require the authenticated desktop app.");
+  return invoke("export_backup", { password });
+}
+export async function decryptBackup(bytes: number[], password: string): Promise<Inventory> {
+  if (!native) throw new Error("Encrypted backups require the authenticated desktop app.");
+  return invoke("decrypt_backup", { bytes, password });
+}
 export const demo =
   import.meta.env.DEV && import.meta.env.MODE === "demo" && !native;
 let demoData: Inventory | undefined;

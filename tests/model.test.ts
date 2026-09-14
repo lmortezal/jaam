@@ -73,5 +73,6 @@ test("backup roundtrip and broken references", () => {
   assert.deepEqual(parseBackup(JSON.parse(JSON.stringify(d))), d);
   d.relationships[0].target_component_id = "missing";
   assert.throws(() => parseBackup(d), /broken/);
-  assert.throws(() => parseBackup({ version: 2 }), /unsupported/);
+  assert.throws(() => parseBackup({ version: 99 }), /unsupported/);
+  assert.equal(parseBackup({ ...d, version: 1, relationships: [] }).version, 2);
 });

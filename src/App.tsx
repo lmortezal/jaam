@@ -30,10 +30,15 @@ import {
   Filter,
   Globe2,
 } from "lucide-react";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
+import { GroupEditor } from "./GroupEditor";
+import { RelationBatchEditor } from "./RelationBatchEditor";
+import { BulkEditor } from "./BulkEditor";
+import { BackupPassword } from "./BackupPassword";
 import * as api from "./api";
 import { Icon, Empty, Modal } from "./ui";
 import { EnvironmentEditor, ComponentEditor, TypeEditor } from "./Editors";
+import { pruneDiagramViews } from "./diagram";
 import { Graph } from "./Graph";
 import {
   actionOf,
@@ -52,6 +57,7 @@ import {
   type Environment,
   type ComponentType,
   type Scan,
+  type DiagramView,
 } from "./model";
 
 type Page = "home" | "environment" | "imports" | "settings";
@@ -75,6 +81,9 @@ export function App() {
     [highlight, setHighlight] = useState(""),
     [sort, setSort] = useState("name"),
     [descending, setDescending] = useState(false);
+  const [groupDialog, setGroupDialog] = useState<{ id: string | null } | null>(null);
+  const [relationsOpen, setRelationsOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()), [bulkOpen, setBulkOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null),
     [editor, setEditor] = useState<Editor>(null),
     [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -87,21 +96,31 @@ export function App() {
     [picked, setPicked] = useState<Set<string>>(new Set()),
     [importEnvironment, setImportEnvironment] = useState(""),
     [scanning, setScanning] = useState(false);
+  const [passwordDialog, setPasswordDialog] = useState<{ file?: File } | null>(null);
   const [backup, setBackup] = useState<Inventory | null>(null),
     [help, setHelp] = useState(false);
+  const backupGeneration = useRef(0);
   const generation = useRef(0),
-    saving = useRef(false),
+    saveTail = useRef<Promise<unknown>>(Promise.resolve()),
+    dataRef = useRef<Inventory | null>(null),
     lastActivity = useRef(Date.now()),
     lastPulse = useRef(0);
   const clear = useCallback(() => {
     generation.current++;
+    backupGeneration.current++;
+    dataRef.current = null;
     setData(null);
     setSelected(null);
+    setSelectedIds(new Set());
+    setBulkOpen(false);
+    setRelationsOpen(false);
+    setGroupDialog(null);
     setEditor(null);
     setConfirmation(null);
     setPalette(false);
     setScan(null);
     setBackup(null);
+    setPasswordDialog(null);
     setQuery("");
     setToast("");
     setError("");
@@ -213,6 +232,7 @@ export function App() {
       const d = await api.unlock();
       if (epoch === generation.current) {
         lastActivity.current = Date.now();
+        dataRef.current = d;
         setData(d);
         setPage("home");
         setEnvironment("");
@@ -223,20 +243,39 @@ export function App() {
       if (epoch === generation.current) setBusy(false);
     }
   }
-  async function save(next: Inventory) {
-    if (saving.current) throw new Error("A save is already in progress.");
-    saving.current = true;
+  function save(next: Inventory | ((current: Inventory) => Inventory)): Promise<Inventory> {
     const epoch = generation.current;
-    try {
-      const saved = await api.save(next);
+    const operation = saveTail.current.catch(() => {}).then(async () => {
+      const current = dataRef.current;
+      if (!current || epoch !== generation.current) throw new Error("LOCKED");
+      const candidate = typeof next === "function" ? next(current) : next;
+      if (candidate.revision !== current.revision) throw new Error("The inventory changed. Review your changes and try again.");
+      const saved = await api.save(pruneDiagramViews(candidate));
       if (epoch !== generation.current) throw new Error("LOCKED");
+      dataRef.current = saved;
       setData(saved);
       return saved;
-    } finally {
-      saving.current = false;
-    }
+    });
+    saveTail.current = operation;
+    return operation;
+  }
+  async function saveDiagram(env: string, view: DiagramView) {
+    await save(current => ({ ...current, diagram_views: { ...current.diagram_views, [env]: view } }));
+  }
+  useEffect(() => {
+    setSelectedIds(old => {
+      const next = new Set([...old].filter(id => data?.components.some(c => c.id === id && c.environment_id === environment)));
+      return next.size === old.size ? old : next;
+    });
+  }, [data, environment]);
+  function toggleSelection(id: string) {
+    setSelectedIds(old => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; });
   }
   function navigate(id: string) {
+    setSelectedIds(new Set());
+    setBulkOpen(false);
+    setRelationsOpen(false);
+    setGroupDialog(null);
     setEnvironment(id);
     setPage("environment");
     setFilters(emptyFilters());
@@ -299,36 +338,10 @@ export function App() {
       setBusy(false);
     }
   }
-  function exportBackup(format: "json" | "yaml") {
-    if (!data) return;
-    const snapshot = data;
-    setConfirmation({
-      title: "Export an unencrypted backup?",
-      description:
-        "This file contains your infrastructure names, endpoints, and notes in plain text. Save it somewhere private. The encrypted vault remains unchanged.",
-      label: `Export ${format.toUpperCase()}`,
-      run: async () => {
-        if (!(await api.status())) throw new Error("LOCKED");
-        const content =
-          format === "json"
-            ? JSON.stringify(snapshot, null, 2)
-            : stringifyYaml(snapshot);
-        const url = URL.createObjectURL(
-          new Blob([content], {
-            type: format === "json" ? "application/json" : "application/yaml",
-          }),
-        );
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `opsportal-${new Date().toISOString().slice(0, 10)}.${format}`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        notify("Backup exported.");
-      },
-    });
-  }
   async function loadBackup(file: File | undefined) {
     if (!file) return;
+    if (file.size > 17 * 1024 * 1024) { report("Backup exceeds 17 MB."); return; }
+    if (file.name.toLowerCase().endsWith(".age")) { setPasswordDialog({ file }); return; }
     const epoch = generation.current;
     try {
       if (file.size > 16 * 1024 * 1024)
@@ -1017,6 +1030,20 @@ export function App() {
                   </button>
                 )}
               </div>
+              {selectedIds.size > 0 && <div className="selection-toolbar" role="region" aria-label="Selected components">
+                <strong>{selectedIds.size} selected</strong><span>{[...selectedIds].filter(id => !visible.some(c => c.id === id)).length} hidden by filters</span>
+                <button className="secondary" onClick={() => setBulkOpen(true)}>Edit selected</button>
+                <button className="secondary" onClick={() => setRelationsOpen(true)}>Link selected</button>
+                <button className="secondary" onClick={() => setGroupDialog({id:null})}>Group selected</button>
+                <button className="danger-subtle" onClick={() => {
+                  const ids = new Set(selectedIds), count = data.relationships.filter(r => ids.has(r.source_component_id) || ids.has(r.target_component_id)).length;
+                  setConfirmation({ title: `Delete ${ids.size} components?`, description: `Delete ${data.components.filter(c => ids.has(c.id)).map(c => c.name).join(", ")}. Also removes ${count} incident relationships and their diagram memberships.`, label: "Delete selected", run: async () => {
+                    await save({ ...data, components: data.components.filter(c => !ids.has(c.id)), relationships: data.relationships.filter(r => !ids.has(r.source_component_id) && !ids.has(r.target_component_id)) });
+                    setSelectedIds(new Set()); setSelected(null); notify("Selected components deleted.");
+                  }});
+                }}>Delete selected</button>
+                <button className="text-button" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
+              </div>}
               <div className="inventory-area">
                 {view === "list" ? (
                   visible.length ? (
@@ -1024,6 +1051,7 @@ export function App() {
                       <table>
                         <thead>
                           <tr>
+                            <th><input type="checkbox" aria-label="Select all visible components" checked={visible.length > 0 && visible.every(c => selectedIds.has(c.id))} ref={node => { if (node) node.indeterminate = visible.some(c => selectedIds.has(c.id)) && !visible.every(c => selectedIds.has(c.id)); }} onChange={e => setSelectedIds(old => { const next = new Set(old); visible.forEach(c => e.target.checked ? next.add(c.id) : next.delete(c.id)); return next; })}/></th>
                             {[
                               ["name", "COMPONENT"],
                               ["type", "TYPE"],
@@ -1060,9 +1088,10 @@ export function App() {
                               <tr
                                 key={c.id}
                                 className={
-                                  selected === c.id ? "selected-row" : ""
+                                  selectedIds.has(c.id) ? "selected-row" : selected === c.id ? "focused-row" : ""
                                 }
                               >
+                                <td><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.has(c.id)} onChange={() => toggleSelection(c.id)}/></td>
                                 <td>
                                   <button
                                     className="component-name"
@@ -1226,6 +1255,10 @@ export function App() {
                         filters={filters}
                         highlight={highlight}
                         selected={selected}
+                        selectedIds={selectedIds}
+                        onEditGroup={id => setGroupDialog({ id })}
+                        onSelection={ids => setSelectedIds(old => old.size === ids.size && [...old].every(id => ids.has(id)) ? old : ids)}
+                        onSave={view => saveDiagram(environment, view)}
                         onSelect={setSelected}
                         onLaunch={(id) => void launch(id)}
                         onNavigate={navigate}
@@ -1616,23 +1649,11 @@ export function App() {
               <section className="settings-section">
                 <h2>Backup & restore</h2>
                 <p className="subtle">
-                  Portable inventory definitions for backups or a private git
-                  repository. Exports are unencrypted.
+                  Password-encrypted backups. Legacy JSON/YAML files can still be imported.
                 </p>
                 <div className="backup-actions">
-                  <button
-                    className="secondary"
-                    onClick={() => exportBackup("json")}
-                  >
-                    <Download size={16} />
-                    Export JSON
-                  </button>
-                  <button
-                    className="secondary"
-                    onClick={() => exportBackup("yaml")}
-                  >
-                    <Download size={16} />
-                    Export YAML
+                  <button className="secondary" onClick={() => setPasswordDialog({})}>
+                    <Download size={16} /> Export encrypted backup
                   </button>
                   <label className="secondary file-button">
                     <Upload size={16} />
@@ -1640,7 +1661,7 @@ export function App() {
                     <input
                       aria-label="Import backup file"
                       type="file"
-                      accept=".json,.yaml,.yml"
+                      accept=".age,.json,.yaml,.yml"
                       onChange={(e) => {
                         void loadBackup(e.target.files?.[0]);
                         e.target.value = "";
@@ -1658,6 +1679,11 @@ export function App() {
           )}
         </main>
       </div>
+      {groupDialog && <GroupEditor data={data} environment={environment} value={data.diagram_views[environment]?.groups.find(g => g.id === groupDialog.id) || null} selected={selectedIds} onClose={() => setGroupDialog(null)} onSave={async group => {
+        await save(current => { const view=current.diagram_views[environment] || {nodes:{},groups:[]}; return {...current,diagram_views:{...current.diagram_views,[environment]:{...view,groups:[...view.groups.filter(g=>g.id!==group.id),group]}}}; });
+      }} onDelete={async () => { await save(current => {const view=current.diagram_views[environment];return {...current,diagram_views:{...current.diagram_views,[environment]:{...view,groups:view.groups.filter(g=>g.id!==groupDialog.id)}}};}); }} />}
+      {relationsOpen && <RelationBatchEditor data={data} ids={selectedIds} onSave={save} onClose={() => setRelationsOpen(false)} />}
+      {bulkOpen && <BulkEditor data={data} ids={selectedIds} onSave={save} onClose={() => setBulkOpen(false)} />}
       {component && (
         <Detail
           data={data}
@@ -1732,6 +1758,23 @@ export function App() {
           onError={report}
         />
       )}
+      {passwordDialog && <BackupPassword restoring={!!passwordDialog.file} onClose={() => { backupGeneration.current++; setPasswordDialog(null); }} onSubmit={async password => {
+        const epoch = generation.current, operation = backupGeneration.current;
+        if (passwordDialog.file) {
+          const bytes = Array.from(new Uint8Array(await passwordDialog.file.arrayBuffer()));
+          const restored = await api.decryptBackup(bytes, password);
+          if (epoch !== generation.current || operation !== backupGeneration.current) throw new Error("Backup cancelled");
+          setBackup(restored);
+        } else {
+          const bytes = await api.exportBackup(password);
+          if (epoch !== generation.current || operation !== backupGeneration.current) throw new Error("Backup cancelled");
+          const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" }));
+          const a = document.createElement("a"); a.href = url;
+          a.download = `opsportal-${new Date().toISOString().slice(0,10)}.json.age`; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          notify("Encrypted backup prepared for download.");
+        }
+      }} />}
       {backup && (
         <Modal title="Restore this inventory?" onClose={() => setBackup(null)}>
           <p>

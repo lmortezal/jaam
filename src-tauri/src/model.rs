@@ -65,7 +65,19 @@ pub struct Document {
     pub components: Vec<Component>,
     pub relationships: Vec<Relationship>,
     pub settings: Settings,
+    #[serde(default)]
+    pub diagram_views: HashMap<String, DiagramView>,
 }
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub struct DiagramView {
+    pub nodes: HashMap<String, NodePosition>,
+    #[serde(default)]
+    pub groups: Vec<DiagramGroup>,
+}
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct DiagramGroup { pub id: String, pub name: String, pub members: Vec<String>, pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct NodePosition { pub x: f64, pub y: f64, pub locked: bool }
 
 // Reference only; no secret values or retrieval commands exist in v1.
 #[allow(dead_code)]
@@ -106,7 +118,7 @@ fn action(value: &Option<LaunchAction>) -> Result<(), String> {
     Ok(())
 }
 pub fn validate(d: &Document) -> Result<(), String> {
-    if d.version != 1 {
+    if d.version != 2 {
         return Err("Unsupported backup version".into());
     }
     if !(1..=120).contains(&d.settings.auto_lock_minutes) {
@@ -125,6 +137,29 @@ pub fn validate(d: &Document) -> Result<(), String> {
     let envs = ids(d.environments.iter().map(|e| e.id.as_str()))?;
     let types = ids(d.component_types.iter().map(|t| t.id.as_str()))?;
     let comps = ids(d.components.iter().map(|c| c.id.as_str()))?;
+    if d.diagram_views.len() > d.environments.len() { return Err("Too many diagram views".into()); }
+    for (env, view) in &d.diagram_views {
+        if !envs.contains(env.as_str()) || view.nodes.len() > d.components.len() { return Err("Invalid diagram view".into()); }
+        for (id, p) in &view.nodes {
+            if !comps.contains(id.as_str()) || !p.x.is_finite() || !p.y.is_finite() || p.x.abs() > 1e7 || p.y.abs() > 1e7 {
+                return Err("Invalid diagram coordinates or component reference".into());
+            }
+        }
+        if view.groups.len() > 1000 { return Err("Too many diagram groups".into()); }
+        ids(view.groups.iter().map(|g| g.id.as_str()))?;
+        let mut members = HashSet::new();
+        for g in &view.groups {
+            name(&g.name)?;
+            if comps.contains(format!("__group__{}", g.id).as_str()) || [g.x,g.y,g.width,g.height].iter().any(|n| !n.is_finite() || n.abs()>1e7) || !(100.0..=100000.0).contains(&g.width) || !(80.0..=100000.0).contains(&g.height) {
+                return Err("Invalid diagram group bounds".into());
+            }
+            for id in &g.members {
+                if !members.insert(id) || !d.components.iter().any(|c| &c.id == id && &c.environment_id == env) {
+                    return Err("Diagram membership must be unique and local to its environment".into());
+                }
+            }
+        }
+    }
     ids(d.relationships.iter().map(|r| r.id.as_str()))?;
     let parents: HashMap<_, _> = d
         .environments
@@ -223,6 +258,20 @@ pub fn validate(d: &Document) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+// Upgrade only in memory. The next successful whole-document transaction persists it.
+pub fn decode(json: &str) -> Result<Document, String> {
+    if json.len() > 16 * 1024 * 1024 { return Err("Inventory exceeds 16 MB".into()); }
+    let mut value: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    match value.get("version").and_then(Value::as_u64) {
+        Some(1) => value["version"] = Value::from(2),
+        Some(2) => {},
+        _ => return Err("Unsupported inventory version".into()),
+    }
+    let document: Document = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    validate(&document)?;
+    Ok(document)
 }
 
 #[cfg(test)]

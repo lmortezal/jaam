@@ -4,6 +4,7 @@ mod launch;
 mod model;
 mod storage;
 mod system_auth;
+mod backup;
 
 use model::Document;
 use std::{
@@ -107,6 +108,36 @@ fn activity(state: State<Shared>) -> Result<(), String> {
 fn session_status(state: State<Shared>) -> bool {
     access(&state, |_| Ok(())).is_ok()
 }
+
+fn verify_epoch(state: &Shared, epoch: u64) -> Result<(), String> {
+    access(state, |_| Ok(()))?;
+    if state.lock().map_err(|_| "Vault unavailable")?.generation != epoch {
+        return Err("LOCKED".into());
+    }
+    Ok(())
+}
+#[tauri::command]
+async fn export_backup(app: tauri::AppHandle, password: String) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Shared>();
+        let epoch = state.lock().map_err(|_| "Vault unavailable")?.generation;
+        let document = access(&state, |s| storage::read(&s.connection))?;
+        let bytes = backup::encrypt(&document, password)?;
+        verify_epoch(&state, epoch)?;
+        Ok(bytes)
+    }).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn decrypt_backup(app: tauri::AppHandle, bytes: Vec<u8>, password: String) -> Result<Document, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Shared>();
+        let epoch = state.lock().map_err(|_| "Vault unavailable")?.generation;
+        verify_epoch(&state, epoch)?;
+        let document = backup::decrypt(&bytes, password)?;
+        verify_epoch(&state, epoch)?;
+        Ok(document)
+    }).await.map_err(|e| e.to_string())?
+}
 #[tauri::command]
 fn save_inventory(state: State<Shared>, document: Document) -> Result<Document, String> {
     access(&state, |s| {
@@ -173,6 +204,7 @@ fn main() {
             scan_configs,
             preview_launch,
             launch_component
+            ,export_backup, decrypt_backup
         ])
         .setup(|app| {
             // Hold an OS file lock for the process lifetime: two first-run instances

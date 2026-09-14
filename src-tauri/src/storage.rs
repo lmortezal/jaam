@@ -51,9 +51,7 @@ pub fn read(conn: &Connection) -> Result<Document, String> {
             r.get(0)
         })
         .map_err(|e| e.to_string())?;
-    let data: Document = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    validate(&data)?;
-    Ok(data)
+    crate::model::decode(&json)
 }
 pub fn save(conn: &mut Connection, mut document: Document) -> Result<Document, String> {
     validate(&document)?;
@@ -86,6 +84,12 @@ mod tests {
         let saved = save(&mut conn, d.clone()).unwrap();
         assert_eq!(saved.revision, 1);
         assert!(save(&mut conn, d).is_err());
+        let mut invalid = saved.clone();
+        invalid.settings.auto_lock_minutes = 0;
+        assert!(save(&mut conn, invalid).is_err());
+        assert_eq!(read(&conn).unwrap().revision, 1);
+        assert_eq!(read(&conn).unwrap().settings.auto_lock_minutes, 7);
+
         drop(conn);
         assert!(!std::fs::read(&path)
             .unwrap()

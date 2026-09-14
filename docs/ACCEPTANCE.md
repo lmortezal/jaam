@@ -1,5 +1,16 @@
 # Platform acceptance
 
+## Current verification (2026-09-13)
+
+- macOS release app builds; its local ad-hoc signature verifies successfully.
+- System authentication was completed by the user; the rebuilt native app reopened the existing inventory and displayed 47 components in its list.
+- Ordinary SQLite rejected the native database without its key.
+- A native diagram check exposed Dagre's single-row layout for mostly disconnected components. The layout now packs disconnected groups separately; a synthetic 47-host regression checks compact bounds, node separation, and relationship direction.
+- Existing infrastructure data was not edited or launched during these native checks.
+- Linux build and desktop verification are explicitly deferred to the user.
+
+## Manual checklist
+
 These require a real graphical login and human authentication. They are not replaced by the demo tests, and have not been claimed as passing solely because compilation succeeds.
 
 Run on both macOS and Linux:
