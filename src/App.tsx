@@ -31,6 +31,8 @@ import {
   Globe2,
 } from "lucide-react";
 import { parse as parseYaml } from "yaml";
+import { ImportReview } from "./ImportReview";
+import { importMatch } from "./importPlan";
 import { GroupEditor } from "./GroupEditor";
 import { RelationBatchEditor } from "./RelationBatchEditor";
 import { BulkEditor } from "./BulkEditor";
@@ -38,7 +40,7 @@ import { BackupPassword } from "./BackupPassword";
 import * as api from "./api";
 import { Icon, Empty, Modal } from "./ui";
 import { EnvironmentEditor, ComponentEditor, TypeEditor } from "./Editors";
-import { pruneDiagramViews } from "./diagram";
+import { mergeDiagramGeometry, pruneDiagramViews } from "./diagram";
 import { Graph } from "./Graph";
 import {
   actionOf,
@@ -81,9 +83,12 @@ export function App() {
     [highlight, setHighlight] = useState(""),
     [sort, setSort] = useState("name"),
     [descending, setDescending] = useState(false);
-  const [groupDialog, setGroupDialog] = useState<{ id: string | null } | null>(null);
+  const [groupDialog, setGroupDialog] = useState<{ id: string | null } | null>(
+    null,
+  );
   const [relationsOpen, setRelationsOpen] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()), [bulkOpen, setBulkOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set()),
+    [bulkOpen, setBulkOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null),
     [editor, setEditor] = useState<Editor>(null),
     [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -92,11 +97,14 @@ export function App() {
     [toast, setToast] = useState(""),
     [palette, setPalette] = useState(false),
     [query, setQuery] = useState("");
+  const [importReview, setImportReview] = useState(false);
   const [scan, setScan] = useState<Scan | null>(null),
     [picked, setPicked] = useState<Set<string>>(new Set()),
     [importEnvironment, setImportEnvironment] = useState(""),
     [scanning, setScanning] = useState(false);
-  const [passwordDialog, setPasswordDialog] = useState<{ file?: File } | null>(null);
+  const [passwordDialog, setPasswordDialog] = useState<{ file?: File } | null>(
+    null,
+  );
   const [backup, setBackup] = useState<Inventory | null>(null),
     [help, setHelp] = useState(false);
   const backupGeneration = useRef(0);
@@ -119,6 +127,7 @@ export function App() {
     setConfirmation(null);
     setPalette(false);
     setScan(null);
+    setImportReview(false);
     setBackup(null);
     setPasswordDialog(null);
     setQuery("");
@@ -243,33 +252,56 @@ export function App() {
       if (epoch === generation.current) setBusy(false);
     }
   }
-  function save(next: Inventory | ((current: Inventory) => Inventory)): Promise<Inventory> {
+  function save(
+    next: Inventory | ((current: Inventory) => Inventory),
+  ): Promise<Inventory> {
     const epoch = generation.current;
-    const operation = saveTail.current.catch(() => {}).then(async () => {
-      const current = dataRef.current;
-      if (!current || epoch !== generation.current) throw new Error("LOCKED");
-      const candidate = typeof next === "function" ? next(current) : next;
-      if (candidate.revision !== current.revision) throw new Error("The inventory changed. Review your changes and try again.");
-      const saved = await api.save(pruneDiagramViews(candidate));
-      if (epoch !== generation.current) throw new Error("LOCKED");
-      dataRef.current = saved;
-      setData(saved);
-      return saved;
-    });
+    const operation = saveTail.current
+      .catch(() => {})
+      .then(async () => {
+        const current = dataRef.current;
+        if (!current || epoch !== generation.current) throw new Error("LOCKED");
+        const candidate = typeof next === "function" ? next(current) : next;
+        if (candidate.revision !== current.revision)
+          throw new Error(
+            "The inventory changed. Review your changes and try again.",
+          );
+        const saved = await api.save(pruneDiagramViews(candidate));
+        if (epoch !== generation.current) throw new Error("LOCKED");
+        dataRef.current = saved;
+        setData(saved);
+        return saved;
+      });
     saveTail.current = operation;
     return operation;
   }
   async function saveDiagram(env: string, view: DiagramView) {
-    await save(current => ({ ...current, diagram_views: { ...current.diagram_views, [env]: view } }));
+    await save((current) => ({
+      ...current,
+      diagram_views: {
+        ...current.diagram_views,
+        [env]: mergeDiagramGeometry(current.diagram_views[env], view),
+      },
+    }));
   }
   useEffect(() => {
-    setSelectedIds(old => {
-      const next = new Set([...old].filter(id => data?.components.some(c => c.id === id && c.environment_id === environment)));
+    setSelectedIds((old) => {
+      const next = new Set(
+        [...old].filter((id) =>
+          data?.components.some(
+            (c) => c.id === id && c.environment_id === environment,
+          ),
+        ),
+      );
       return next.size === old.size ? old : next;
     });
   }, [data, environment]);
   function toggleSelection(id: string) {
-    setSelectedIds(old => { const next = new Set(old); next.has(id) ? next.delete(id) : next.add(id); return next; });
+    setSelectedIds((old) => {
+      const next = new Set(old);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }
   function navigate(id: string) {
     setSelectedIds(new Set());
@@ -309,39 +341,16 @@ export function App() {
       setScanning(false);
     }
   }
-  async function importPicked() {
-    if (!data || !scan) return;
-    setBusy(true);
-    try {
-      const suggestions = scan.suggestions.filter((s) => picked.has(s.id));
-      await save({
-        ...data,
-        components: [
-          ...data.components,
-          ...suggestions.map((s) => ({
-            id: uid(),
-            name: s.name,
-            environment_id: importEnvironment,
-            component_type_id: s.component_type_id,
-            properties: s.properties,
-            launch_action: null,
-            updated_at: new Date().toISOString(),
-          })),
-        ],
-      });
-      setPicked(new Set());
-      notify(`Added ${suggestions.length} components.`);
-      navigate(importEnvironment);
-    } catch (e) {
-      report(e);
-    } finally {
-      setBusy(false);
-    }
-  }
   async function loadBackup(file: File | undefined) {
     if (!file) return;
-    if (file.size > 17 * 1024 * 1024) { report("Backup exceeds 17 MB."); return; }
-    if (file.name.toLowerCase().endsWith(".age")) { setPasswordDialog({ file }); return; }
+    if (file.size > 17 * 1024 * 1024) {
+      report("Backup exceeds 17 MB.");
+      return;
+    }
+    if (file.name.toLowerCase().endsWith(".age")) {
+      setPasswordDialog({ file });
+      return;
+    }
     const epoch = generation.current;
     try {
       if (file.size > 16 * 1024 * 1024)
@@ -1030,20 +1039,86 @@ export function App() {
                   </button>
                 )}
               </div>
-              {selectedIds.size > 0 && <div className="selection-toolbar" role="region" aria-label="Selected components">
-                <strong>{selectedIds.size} selected</strong><span>{[...selectedIds].filter(id => !visible.some(c => c.id === id)).length} hidden by filters</span>
-                <button className="secondary" onClick={() => setBulkOpen(true)}>Edit selected</button>
-                <button className="secondary" onClick={() => setRelationsOpen(true)}>Link selected</button>
-                <button className="secondary" onClick={() => setGroupDialog({id:null})}>Group selected</button>
-                <button className="danger-subtle" onClick={() => {
-                  const ids = new Set(selectedIds), count = data.relationships.filter(r => ids.has(r.source_component_id) || ids.has(r.target_component_id)).length;
-                  setConfirmation({ title: `Delete ${ids.size} components?`, description: `Delete ${data.components.filter(c => ids.has(c.id)).map(c => c.name).join(", ")}. Also removes ${count} incident relationships and their diagram memberships.`, label: "Delete selected", run: async () => {
-                    await save({ ...data, components: data.components.filter(c => !ids.has(c.id)), relationships: data.relationships.filter(r => !ids.has(r.source_component_id) && !ids.has(r.target_component_id)) });
-                    setSelectedIds(new Set()); setSelected(null); notify("Selected components deleted.");
-                  }});
-                }}>Delete selected</button>
-                <button className="text-button" onClick={() => setSelectedIds(new Set())}>Clear selection</button>
-              </div>}
+              {selectedIds.size > 0 && (
+                <div
+                  className="selection-toolbar"
+                  role="region"
+                  aria-label="Selected components"
+                >
+                  <strong>{selectedIds.size} selected</strong>
+                  <span>
+                    {
+                      [...selectedIds].filter(
+                        (id) => !visible.some((c) => c.id === id),
+                      ).length
+                    }{" "}
+                    hidden by filters
+                  </span>
+                  <button
+                    className="secondary"
+                    onClick={() => setBulkOpen(true)}
+                  >
+                    Edit selected
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() => setRelationsOpen(true)}
+                  >
+                    Link selected
+                  </button>
+                  <button
+                    className="secondary"
+                    onClick={() => setGroupDialog({ id: null })}
+                  >
+                    Group selected
+                  </button>
+                  <button
+                    className="danger-subtle"
+                    onClick={() => {
+                      const ids = new Set(selectedIds),
+                        count = data.relationships.filter(
+                          (r) =>
+                            ids.has(r.source_component_id) ||
+                            ids.has(r.target_component_id),
+                        ).length;
+                      setConfirmation({
+                        title: `Delete ${ids.size} components?`,
+                        description: `Delete ${data.components
+                          .filter((c) => ids.has(c.id))
+                          .map((c) => c.name)
+                          .join(
+                            ", ",
+                          )}. Also removes ${count} incident relationships and their diagram memberships.`,
+                        label: "Delete selected",
+                        run: async () => {
+                          await save({
+                            ...data,
+                            components: data.components.filter(
+                              (c) => !ids.has(c.id),
+                            ),
+                            relationships: data.relationships.filter(
+                              (r) =>
+                                !ids.has(r.source_component_id) &&
+                                !ids.has(r.target_component_id),
+                            ),
+                          });
+                          setSelectedIds(new Set());
+                          setSelected(null);
+                          notify("Selected components deleted.");
+                        },
+                      });
+                    }}
+                  >
+                    Delete selected
+                  </button>
+                  <button
+                    className="text-button"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )}
               <div className="inventory-area">
                 {view === "list" ? (
                   visible.length ? (
@@ -1051,7 +1126,37 @@ export function App() {
                       <table>
                         <thead>
                           <tr>
-                            <th><input type="checkbox" aria-label="Select all visible components" checked={visible.length > 0 && visible.every(c => selectedIds.has(c.id))} ref={node => { if (node) node.indeterminate = visible.some(c => selectedIds.has(c.id)) && !visible.every(c => selectedIds.has(c.id)); }} onChange={e => setSelectedIds(old => { const next = new Set(old); visible.forEach(c => e.target.checked ? next.add(c.id) : next.delete(c.id)); return next; })}/></th>
+                            <th>
+                              <input
+                                type="checkbox"
+                                aria-label="Select all visible components"
+                                checked={
+                                  visible.length > 0 &&
+                                  visible.every((c) => selectedIds.has(c.id))
+                                }
+                                ref={(node) => {
+                                  if (node)
+                                    node.indeterminate =
+                                      visible.some((c) =>
+                                        selectedIds.has(c.id),
+                                      ) &&
+                                      !visible.every((c) =>
+                                        selectedIds.has(c.id),
+                                      );
+                                }}
+                                onChange={(e) =>
+                                  setSelectedIds((old) => {
+                                    const next = new Set(old);
+                                    visible.forEach((c) =>
+                                      e.target.checked
+                                        ? next.add(c.id)
+                                        : next.delete(c.id),
+                                    );
+                                    return next;
+                                  })
+                                }
+                              />
+                            </th>
                             {[
                               ["name", "COMPONENT"],
                               ["type", "TYPE"],
@@ -1088,10 +1193,21 @@ export function App() {
                               <tr
                                 key={c.id}
                                 className={
-                                  selectedIds.has(c.id) ? "selected-row" : selected === c.id ? "focused-row" : ""
+                                  selectedIds.has(c.id)
+                                    ? "selected-row"
+                                    : selected === c.id
+                                      ? "focused-row"
+                                      : ""
                                 }
                               >
-                                <td><input type="checkbox" aria-label={`Select ${c.name}`} checked={selectedIds.has(c.id)} onChange={() => toggleSelection(c.id)}/></td>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    aria-label={`Select ${c.name}`}
+                                    checked={selectedIds.has(c.id)}
+                                    onChange={() => toggleSelection(c.id)}
+                                  />
+                                </td>
                                 <td>
                                   <button
                                     className="component-name"
@@ -1256,9 +1372,16 @@ export function App() {
                         highlight={highlight}
                         selected={selected}
                         selectedIds={selectedIds}
-                        onEditGroup={id => setGroupDialog({ id })}
-                        onSelection={ids => setSelectedIds(old => old.size === ids.size && [...old].every(id => ids.has(id)) ? old : ids)}
-                        onSave={view => saveDiagram(environment, view)}
+                        onEditGroup={(id) => setGroupDialog({ id })}
+                        onSelection={(ids) =>
+                          setSelectedIds((old) =>
+                            old.size === ids.size &&
+                            [...old].every((id) => ids.has(id))
+                              ? old
+                              : ids,
+                          )
+                        }
+                        onSave={(view) => saveDiagram(environment, view)}
                         onSelect={setSelected}
                         onLaunch={(id) => void launch(id)}
                         onNavigate={navigate}
@@ -1349,13 +1472,9 @@ export function App() {
                                       data.component_types.some(
                                         (t) => t.id === s.component_type_id,
                                       ) &&
-                                      !data.components.some(
-                                        (c) =>
-                                          c.environment_id ===
-                                            importEnvironment &&
-                                          c.component_type_id ===
-                                            s.component_type_id &&
-                                          c.name === s.name,
+                                      ["new", "update"].includes(
+                                        importMatch(data, s, importEnvironment)
+                                          .kind,
                                       ),
                                   )
                                   .map((s) => s.id),
@@ -1363,7 +1482,7 @@ export function App() {
                         )
                       }
                     >
-                      {picked.size ? "Deselect all" : "Select all new"}
+                      {picked.size ? "Deselect all" : "Select new and matched"}
                     </button>
                   </div>
                   {scan.warnings.map((w, i) => (
@@ -1374,12 +1493,8 @@ export function App() {
                   {scan.suggestions.length ? (
                     <div className="suggestions">
                       {scan.suggestions.map((s) => {
-                        const exists = data.components.some(
-                            (c) =>
-                              c.environment_id === importEnvironment &&
-                              c.component_type_id === s.component_type_id &&
-                              c.name === s.name,
-                          ),
+                        const match = importMatch(data, s, importEnvironment),
+                          exists = match.kind === "existing",
                           missing = !data.component_types.some(
                             (t) => t.id === s.component_type_id,
                           );
@@ -1420,6 +1535,13 @@ export function App() {
                             <code>{s.source}</code>
                             {exists && (
                               <span className="read-only">ALREADY ADDED</span>
+                            )}
+                            {!exists && match.kind !== "new" && (
+                              <span className="read-only">
+                                {match.kind === "update"
+                                  ? "ALIAS UPDATE"
+                                  : "REVIEW MATCH"}
+                              </span>
                             )}
                             {missing && (
                               <span className="warning-note">
@@ -1469,10 +1591,10 @@ export function App() {
                     <button
                       className="primary"
                       disabled={!picked.size || !importEnvironment || busy}
-                      onClick={() => void importPicked()}
+                      onClick={() => setImportReview(true)}
                     >
                       <Plus size={16} />
-                      Add {picked.size || "selected"} components
+                      Review {picked.size || "selected"} suggestions
                     </button>
                   </div>
                 </>
@@ -1649,10 +1771,14 @@ export function App() {
               <section className="settings-section">
                 <h2>Backup & restore</h2>
                 <p className="subtle">
-                  Password-encrypted backups. Legacy JSON/YAML files can still be imported.
+                  Password-encrypted backups. Legacy JSON/YAML files can still
+                  be imported.
                 </p>
                 <div className="backup-actions">
-                  <button className="secondary" onClick={() => setPasswordDialog({})}>
+                  <button
+                    className="secondary"
+                    onClick={() => setPasswordDialog({})}
+                  >
                     <Download size={16} /> Export encrypted backup
                   </button>
                   <label className="secondary file-button">
@@ -1679,11 +1805,85 @@ export function App() {
           )}
         </main>
       </div>
-      {groupDialog && <GroupEditor data={data} environment={environment} value={data.diagram_views[environment]?.groups.find(g => g.id === groupDialog.id) || null} selected={selectedIds} onClose={() => setGroupDialog(null)} onSave={async group => {
-        await save(current => { const view=current.diagram_views[environment] || {nodes:{},groups:[]}; return {...current,diagram_views:{...current.diagram_views,[environment]:{...view,groups:[...view.groups.filter(g=>g.id!==group.id),group]}}}; });
-      }} onDelete={async () => { await save(current => {const view=current.diagram_views[environment];return {...current,diagram_views:{...current.diagram_views,[environment]:{...view,groups:view.groups.filter(g=>g.id!==groupDialog.id)}}};}); }} />}
-      {relationsOpen && <RelationBatchEditor data={data} ids={selectedIds} onSave={save} onClose={() => setRelationsOpen(false)} />}
-      {bulkOpen && <BulkEditor data={data} ids={selectedIds} onSave={save} onClose={() => setBulkOpen(false)} />}
+      {importReview && data && scan && (
+        <ImportReview
+          data={data}
+          suggestions={scan.suggestions.filter((s) => picked.has(s.id))}
+          environment={importEnvironment}
+          onSave={async (next) => {
+            await save(next);
+            setPicked(new Set());
+            notify("Import applied.");
+            navigate(importEnvironment);
+          }}
+          onClose={() => setImportReview(false)}
+        />
+      )}
+      {groupDialog && (
+        <GroupEditor
+          data={data}
+          environment={environment}
+          value={
+            data.diagram_views[environment]?.groups.find(
+              (g) => g.id === groupDialog.id,
+            ) || null
+          }
+          selected={selectedIds}
+          onClose={() => setGroupDialog(null)}
+          onSave={async (group) => {
+            await save((current) => {
+              const view = current.diagram_views[environment] || {
+                nodes: {},
+                groups: [],
+              };
+              return {
+                ...current,
+                diagram_views: {
+                  ...current.diagram_views,
+                  [environment]: {
+                    ...view,
+                    groups: [
+                      ...view.groups.filter((g) => g.id !== group.id),
+                      group,
+                    ],
+                  },
+                },
+              };
+            });
+          }}
+          onDelete={async () => {
+            await save((current) => {
+              const view = current.diagram_views[environment];
+              return {
+                ...current,
+                diagram_views: {
+                  ...current.diagram_views,
+                  [environment]: {
+                    ...view,
+                    groups: view.groups.filter((g) => g.id !== groupDialog.id),
+                  },
+                },
+              };
+            });
+          }}
+        />
+      )}
+      {relationsOpen && (
+        <RelationBatchEditor
+          data={data}
+          ids={selectedIds}
+          onSave={save}
+          onClose={() => setRelationsOpen(false)}
+        />
+      )}
+      {bulkOpen && (
+        <BulkEditor
+          data={data}
+          ids={selectedIds}
+          onSave={save}
+          onClose={() => setBulkOpen(false)}
+        />
+      )}
       {component && (
         <Detail
           data={data}
@@ -1758,23 +1958,49 @@ export function App() {
           onError={report}
         />
       )}
-      {passwordDialog && <BackupPassword restoring={!!passwordDialog.file} onClose={() => { backupGeneration.current++; setPasswordDialog(null); }} onSubmit={async password => {
-        const epoch = generation.current, operation = backupGeneration.current;
-        if (passwordDialog.file) {
-          const bytes = Array.from(new Uint8Array(await passwordDialog.file.arrayBuffer()));
-          const restored = await api.decryptBackup(bytes, password);
-          if (epoch !== generation.current || operation !== backupGeneration.current) throw new Error("Backup cancelled");
-          setBackup(restored);
-        } else {
-          const bytes = await api.exportBackup(password);
-          if (epoch !== generation.current || operation !== backupGeneration.current) throw new Error("Backup cancelled");
-          const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/octet-stream" }));
-          const a = document.createElement("a"); a.href = url;
-          a.download = `opsportal-${new Date().toISOString().slice(0,10)}.json.age`; a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          notify("Encrypted backup prepared for download.");
-        }
-      }} />}
+      {passwordDialog && (
+        <BackupPassword
+          restoring={!!passwordDialog.file}
+          onClose={() => {
+            backupGeneration.current++;
+            setPasswordDialog(null);
+          }}
+          onSubmit={async (password) => {
+            const epoch = generation.current,
+              operation = backupGeneration.current;
+            if (passwordDialog.file) {
+              const bytes = Array.from(
+                new Uint8Array(await passwordDialog.file.arrayBuffer()),
+              );
+              const restored = await api.decryptBackup(bytes, password);
+              if (
+                epoch !== generation.current ||
+                operation !== backupGeneration.current
+              )
+                throw new Error("Backup cancelled");
+              setBackup(restored);
+            } else {
+              const bytes = await api.exportBackup(password);
+              if (
+                epoch !== generation.current ||
+                operation !== backupGeneration.current
+              )
+                throw new Error("Backup cancelled");
+              const url = URL.createObjectURL(
+                new Blob([new Uint8Array(bytes)], {
+                  type: "application/octet-stream",
+                }),
+              );
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `opsportal-${new Date().toISOString().slice(0, 10)}.json.age`;
+              a.click();
+              setTimeout(() => URL.revokeObjectURL(url), 1000);
+              notify("Encrypted backup prepared for download.");
+            }
+          }}
+        />
+      )}
       {backup && (
         <Modal title="Restore this inventory?" onClose={() => setBackup(null)}>
           <p>

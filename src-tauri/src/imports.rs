@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, io::Read, path::Path};
+use std::{io::Read, path::Path};
 
 #[derive(Serialize)]
 pub struct Suggestion {
@@ -15,9 +15,19 @@ pub struct Scan {
     pub suggestions: Vec<Suggestion>,
     pub warnings: Vec<String>,
 }
-fn read(path: &Path) -> Result<Option<String>, String> {
-    match std::fs::File::open(path) {
+pub(crate) fn read(path: &Path) -> Result<Option<String>, String> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    match options.open(path) {
         Ok(file) => {
+            if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+                return Err("Only regular configuration files are read".into());
+            }
             let mut text = String::new();
             file.take(2 * 1024 * 1024 + 1)
                 .read_to_string(&mut text)
@@ -33,116 +43,15 @@ fn read(path: &Path) -> Result<Option<String>, String> {
 }
 pub fn scan(home: &Path) -> Scan {
     let mut result = Scan::default();
-    for (source, path) in [
-        ("SSH", home.join(".ssh/config")),
-        ("Kubernetes", home.join(".kube/config")),
-    ] {
-        match read(&path) {
-            Ok(Some(text)) => {
-                if source == "SSH" {
-                    ssh(&text, &mut result)
-                } else {
-                    kube(&text, &mut result)
-                }
-            }
-            Ok(None) => result.warnings.push(format!("{source} config not found")),
-            Err(e) => result
-                .warnings
-                .push(format!("Cannot read {source} config: {e}")),
-        }
+    crate::ssh_config::scan(home, Some(Path::new("/etc/ssh/ssh_config")), &mut result);
+    match read(&home.join(".kube/config")) {
+        Ok(Some(text)) => kube(&text, &mut result),
+        Ok(None) => result.warnings.push("Kubernetes config not found".into()),
+        Err(e) => result
+            .warnings
+            .push(format!("Cannot read Kubernetes config: {e}")),
     }
     result
-}
-pub fn ssh(text: &str, result: &mut Scan) {
-    // Suggestions use literal aliases so OpenSSH resolves Include/Match/wildcards at launch.
-    // We do not execute `ssh -G`: Match exec can run arbitrary local commands.
-    let mut aliases = Vec::<String>::new();
-    let mut blocks: Vec<(Vec<String>, Map<String, Value>)> = Vec::new();
-    let mut props = Map::new();
-    let mut limited = false;
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let split = line.find(|c: char| c.is_whitespace() || c == '=');
-        let Some(pos) = split else {
-            continue;
-        };
-        let key = line[..pos].to_lowercase();
-        let value = line[pos..].trim_start_matches(|c: char| c.is_whitespace() || c == '=');
-        let Some(tokens) = shlex::split(value) else {
-            result
-                .warnings
-                .push("Skipped an SSH line with invalid quoting".into());
-            continue;
-        };
-        if key == "host" || key == "match" {
-            blocks.push((std::mem::take(&mut aliases), std::mem::take(&mut props)));
-            if key == "host" {
-                aliases = tokens
-                    .into_iter()
-                    .filter(|s| {
-                        let literal = !s.contains(['*', '?', '!']);
-                        if !literal {
-                            limited = true;
-                        }
-                        literal
-                    })
-                    .collect();
-            } else {
-                limited = true;
-            }
-        } else if key == "include" {
-            limited = true;
-        } else if let Some(value) = tokens.first() {
-            let field = match key.as_str() {
-                "hostname" => "resolved_hostname",
-                "user" => "ssh_user",
-                "port" => "ssh_port",
-                "identityfile" => "ssh_identity_file",
-                _ => continue,
-            };
-            let parsed = if field == "ssh_port" {
-                match value.parse::<u16>() {
-                    Ok(p) if p > 0 => Value::from(p),
-                    _ => {
-                        result.warnings.push("Skipped invalid SSH port".into());
-                        continue;
-                    }
-                }
-            } else {
-                Value::from(value.as_str())
-            };
-            props.entry(field).or_insert(parsed);
-        }
-    }
-    blocks.push((aliases, props));
-    let mut seen = HashSet::new();
-    for (aliases, props) in blocks {
-        for alias in aliases {
-            if !seen.insert(alias.clone()) {
-                continue;
-            }
-            // Informational values use source_* names; do not override OpenSSH's actual config.
-            let mut properties = Map::from_iter(
-                props
-                    .iter()
-                    .map(|(k, v)| (format!("source_{k}"), v.clone())),
-            );
-            properties.insert("hostname".into(), alias.clone().into());
-            result.suggestions.push(Suggestion {
-                id: format!("ssh:{alias}"),
-                source: "~/.ssh/config".into(),
-                name: alias,
-                component_type_id: "server".into(),
-                properties,
-            });
-        }
-    }
-    if limited {
-        result.warnings.push("SSH Include, Match and wildcard rules are not evaluated. Suggestions show literal aliases only; SSH applies your full config when launched.".into());
-    }
 }
 pub fn kube(text: &str, result: &mut Scan) {
     let doc: Value = match serde_yaml::from_str(text) {
@@ -212,7 +121,9 @@ mod tests {
         let kube_text = "contexts:\n- name: test\n  context: {cluster: test}\n";
         std::fs::write(&ssh_path, ssh_text).unwrap();
         std::fs::write(&kube_path, kube_text).unwrap();
-        let result = scan(&home);
+        let mut result = Scan::default();
+        crate::ssh_config::scan(&home, None, &mut result);
+        kube(&std::fs::read_to_string(&kube_path).unwrap(), &mut result);
         assert_eq!(result.suggestions.len(), 2);
         assert_eq!(std::fs::read_to_string(ssh_path).unwrap(), ssh_text);
         assert_eq!(std::fs::read_to_string(kube_path).unwrap(), kube_text);
@@ -221,9 +132,12 @@ mod tests {
     #[test]
     fn import_is_data_only() {
         let mut s = Scan::default();
-        ssh("Host prod alias\n HostName 10.0.0.1\n User root\n IdentityFile \"~/.ssh/my key\"\nMatch exec touch /tmp/no\nHost *\nUser nobody\nInclude other", &mut s);
+        crate::ssh_config::parse_text("Host prod alias\n HostName 10.0.0.1\n User root\n IdentityFile \"~/.ssh/my key\"\nMatch exec touch /tmp/no\nHost *\nUser nobody\nInclude other", &mut s);
         assert_eq!(s.suggestions.len(), 2);
-        assert_eq!(s.suggestions[0].properties["hostname"], "prod");
+        assert!(s
+            .suggestions
+            .iter()
+            .any(|s| s.properties["hostname"] == "prod"));
         assert!(!s.suggestions[0].properties.contains_key("ssh_user"));
         assert!(!s.warnings.is_empty());
         kube("contexts:\n- name: prod\n  context: {cluster: main}\nclusters:\n- name: main\n  cluster: {server: 'https://127.0.0.1:6443', certificate-authority-data: SECRET}\nusers:\n- name: root\n  user: {token: SECRET, exec: {command: evil}}", &mut s);

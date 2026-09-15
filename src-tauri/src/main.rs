@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod backup;
 mod imports;
 mod launch;
 mod model;
+mod ssh_config;
 mod storage;
 mod system_auth;
-mod backup;
 
 use model::Document;
 use std::{
@@ -125,10 +126,16 @@ async fn export_backup(app: tauri::AppHandle, password: String) -> Result<Vec<u8
         let bytes = backup::encrypt(&document, password)?;
         verify_epoch(&state, epoch)?;
         Ok(bytes)
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
-async fn decrypt_backup(app: tauri::AppHandle, bytes: Vec<u8>, password: String) -> Result<Document, String> {
+async fn decrypt_backup(
+    app: tauri::AppHandle,
+    bytes: Vec<u8>,
+    password: String,
+) -> Result<Document, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<Shared>();
         let epoch = state.lock().map_err(|_| "Vault unavailable")?.generation;
@@ -136,7 +143,9 @@ async fn decrypt_backup(app: tauri::AppHandle, bytes: Vec<u8>, password: String)
         let document = backup::decrypt(&bytes, password)?;
         verify_epoch(&state, epoch)?;
         Ok(document)
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn save_inventory(state: State<Shared>, document: Document) -> Result<Document, String> {
@@ -147,11 +156,18 @@ fn save_inventory(state: State<Shared>, document: Document) -> Result<Document, 
     })
 }
 #[tauri::command]
-fn scan_configs(state: State<Shared>) -> Result<imports::Scan, String> {
-    access(&state, |_| {
+async fn scan_configs(app: tauri::AppHandle) -> Result<imports::Scan, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Shared>();
+        let epoch = state.lock().map_err(|_| "Vault unavailable")?.generation;
+        verify_epoch(&state, epoch)?;
         let home = std::env::var("HOME").map_err(|_| "Home directory unavailable")?;
-        Ok(imports::scan(std::path::Path::new(&home)))
+        let scan = imports::scan(std::path::Path::new(&home));
+        verify_epoch(&state, epoch)?;
+        Ok(scan)
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 fn component_action(
     s: &Session,
@@ -203,8 +219,9 @@ fn main() {
             save_inventory,
             scan_configs,
             preview_launch,
-            launch_component
-            ,export_backup, decrypt_backup
+            launch_component,
+            export_backup,
+            decrypt_backup
         ])
         .setup(|app| {
             // Hold an OS file lock for the process lifetime: two first-run instances

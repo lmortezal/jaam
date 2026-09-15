@@ -3,11 +3,16 @@ import { listen } from "@tauri-apps/api/event";
 import type { Inventory, Scan } from "./model";
 export const native = isTauri();
 export async function exportBackup(password: string): Promise<number[]> {
-  if (!native) throw new Error("Encrypted backups require the authenticated desktop app.");
+  if (!native)
+    throw new Error("Encrypted backups require the authenticated desktop app.");
   return invoke("export_backup", { password });
 }
-export async function decryptBackup(bytes: number[], password: string): Promise<Inventory> {
-  if (!native) throw new Error("Encrypted backups require the authenticated desktop app.");
+export async function decryptBackup(
+  bytes: number[],
+  password: string,
+): Promise<Inventory> {
+  if (!native)
+    throw new Error("Encrypted backups require the authenticated desktop app.");
   return invoke("decrypt_backup", { bytes, password });
 }
 export const demo =
@@ -56,7 +61,16 @@ export async function scan(): Promise<Scan> {
         source: "~/.ssh/config (example)",
         name: "demo-host",
         component_type_id: "server",
-        properties: { hostname: "demo-host", source_ssh_user: "ops" },
+        properties: {
+          hostname: "demo-host",
+          source_ssh_alias: "demo-host",
+          source_resolved_hostname: "demo.example",
+          source_ssh_user: "ops",
+          source_ssh_port: 22,
+          source_ssh_identity_files: "[]",
+          source_ssh_proxy_jump: "none",
+          source_ssh_resolution: "static-v1",
+        },
       },
       {
         id: "kube:demo-cluster",

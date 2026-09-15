@@ -79,7 +79,26 @@ mod tests {
         let path = std::env::temp_dir().join(format!("opsportal-test-{}.db", std::process::id()));
         let key = "a".repeat(64);
         let mut conn = open(&path, &key).unwrap();
+        // Existing version-1 inventories migrate on the next successful transaction.
+        let mut legacy = serde_json::to_value(Document::default()).unwrap();
+        legacy["version"] = 1.into();
+        legacy.as_object_mut().unwrap().remove("diagram_views");
+        conn.execute(
+            "UPDATE inventory SET document=?1 WHERE id=1",
+            [legacy.to_string()],
+        )
+        .unwrap();
         let mut d = read(&conn).unwrap();
+        assert_eq!(d.version, 2);
+        let stored: String = conn
+            .query_row("SELECT document FROM inventory WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&stored).unwrap()["version"],
+            1
+        );
         d.settings.auto_lock_minutes = 7;
         let saved = save(&mut conn, d.clone()).unwrap();
         assert_eq!(saved.revision, 1);

@@ -54,9 +54,24 @@ export interface Inventory {
   settings: { auto_lock_minutes: number; terminal: string };
   diagram_views: Record<string, DiagramView>;
 }
-export interface NodePosition { x: number; y: number; locked: boolean }
-export interface DiagramGroup { id: string; name: string; members: string[]; x: number; y: number; width: number; height: number }
-export interface DiagramView { nodes: Record<string, NodePosition>; groups: DiagramGroup[] }
+export interface NodePosition {
+  x: number;
+  y: number;
+  locked: boolean;
+}
+export interface DiagramGroup {
+  id: string;
+  name: string;
+  members: string[];
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export interface DiagramView {
+  nodes: Record<string, NodePosition>;
+  groups: DiagramGroup[];
+}
 export interface Suggestion {
   id: string;
   source: string;
@@ -185,7 +200,11 @@ export function graphElements(d: Inventory, env: string, filters: Filters) {
           (e) => e.id === c.environment_id,
         )?.name;
         const badges = [
-          c.properties.internet_facing === true ? "↗ PUBLIC" : c.properties.internet_facing === false ? "PRIVATE" : "EXPOSURE NOT SET",
+          c.properties.internet_facing === true
+            ? "↗ PUBLIC"
+            : c.properties.internet_facing === false
+              ? "PRIVATE"
+              : "EXPOSURE NOT SET",
           `● ${criticalityOf(c).toUpperCase()}`,
         ]
           .filter(Boolean)

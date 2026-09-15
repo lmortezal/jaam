@@ -75,9 +75,21 @@ pub struct DiagramView {
     pub groups: Vec<DiagramGroup>,
 }
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct DiagramGroup { pub id: String, pub name: String, pub members: Vec<String>, pub x: f64, pub y: f64, pub width: f64, pub height: f64 }
+pub struct DiagramGroup {
+    pub id: String,
+    pub name: String,
+    pub members: Vec<String>,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
 #[derive(Clone, Serialize, Deserialize, Debug)]
-pub struct NodePosition { pub x: f64, pub y: f64, pub locked: bool }
+pub struct NodePosition {
+    pub x: f64,
+    pub y: f64,
+    pub locked: bool,
+}
 
 // Reference only; no secret values or retrieval commands exist in v1.
 #[allow(dead_code)]
@@ -137,30 +149,55 @@ pub fn validate(d: &Document) -> Result<(), String> {
     let envs = ids(d.environments.iter().map(|e| e.id.as_str()))?;
     let types = ids(d.component_types.iter().map(|t| t.id.as_str()))?;
     let comps = ids(d.components.iter().map(|c| c.id.as_str()))?;
-    if d.diagram_views.len() > d.environments.len() { return Err("Too many diagram views".into()); }
+    let rels = ids(d.relationships.iter().map(|r| r.id.as_str()))?;
+    if d.diagram_views.len() > d.environments.len() {
+        return Err("Too many diagram views".into());
+    }
     for (env, view) in &d.diagram_views {
-        if !envs.contains(env.as_str()) || view.nodes.len() > d.components.len() { return Err("Invalid diagram view".into()); }
+        if !envs.contains(env.as_str()) || view.nodes.len() > d.components.len() {
+            return Err("Invalid diagram view".into());
+        }
         for (id, p) in &view.nodes {
-            if !comps.contains(id.as_str()) || !p.x.is_finite() || !p.y.is_finite() || p.x.abs() > 1e7 || p.y.abs() > 1e7 {
+            if !comps.contains(id.as_str())
+                || !p.x.is_finite()
+                || !p.y.is_finite()
+                || p.x.abs() > 1e7
+                || p.y.abs() > 1e7
+            {
                 return Err("Invalid diagram coordinates or component reference".into());
             }
         }
-        if view.groups.len() > 1000 { return Err("Too many diagram groups".into()); }
+        if view.groups.len() > 1000 {
+            return Err("Too many diagram groups".into());
+        }
         ids(view.groups.iter().map(|g| g.id.as_str()))?;
         let mut members = HashSet::new();
         for g in &view.groups {
             name(&g.name)?;
-            if comps.contains(format!("__group__{}", g.id).as_str()) || [g.x,g.y,g.width,g.height].iter().any(|n| !n.is_finite() || n.abs()>1e7) || !(100.0..=100000.0).contains(&g.width) || !(80.0..=100000.0).contains(&g.height) {
+            if comps.contains(format!("__group__{}", g.id).as_str())
+                || rels.contains(format!("__group__{}", g.id).as_str())
+                || [g.x, g.y, g.width, g.height]
+                    .iter()
+                    .any(|n| !n.is_finite() || n.abs() > 1e7)
+                || !(100.0..=100000.0).contains(&g.width)
+                || !(80.0..=100000.0).contains(&g.height)
+            {
                 return Err("Invalid diagram group bounds".into());
             }
             for id in &g.members {
-                if !members.insert(id) || !d.components.iter().any(|c| &c.id == id && &c.environment_id == env) {
-                    return Err("Diagram membership must be unique and local to its environment".into());
+                if !members.insert(id)
+                    || !d
+                        .components
+                        .iter()
+                        .any(|c| &c.id == id && &c.environment_id == env)
+                {
+                    return Err(
+                        "Diagram membership must be unique and local to its environment".into(),
+                    );
                 }
             }
         }
     }
-    ids(d.relationships.iter().map(|r| r.id.as_str()))?;
     let parents: HashMap<_, _> = d
         .environments
         .iter()
@@ -262,11 +299,13 @@ pub fn validate(d: &Document) -> Result<(), String> {
 
 // Upgrade only in memory. The next successful whole-document transaction persists it.
 pub fn decode(json: &str) -> Result<Document, String> {
-    if json.len() > 16 * 1024 * 1024 { return Err("Inventory exceeds 16 MB".into()); }
+    if json.len() > 16 * 1024 * 1024 {
+        return Err("Inventory exceeds 16 MB".into());
+    }
     let mut value: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
     match value.get("version").and_then(Value::as_u64) {
         Some(1) => value["version"] = Value::from(2),
-        Some(2) => {},
+        Some(2) => {}
         _ => return Err("Unsupported inventory version".into()),
     }
     let document: Document = serde_json::from_value(value).map_err(|e| e.to_string())?;
@@ -277,6 +316,32 @@ pub fn decode(json: &str) -> Result<Document, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn diagram_state_migrates_and_rejects_invalid_membership() {
+        let json = serde_json::json!({
+            "id": "e", "name": "Env", "description": "", "color": "", "icon": "", "parent_id": null
+        });
+        let mut value = serde_json::to_value(Document::default()).unwrap();
+        value["version"] = 1.into();
+        value["environments"] = serde_json::json!([json]);
+        value["components"] = serde_json::json!([{"id":"c","name":"Server","environment_id":"e","component_type_id":"server","properties":{},"launch_action":null,"updated_at":""}]);
+        value.as_object_mut().unwrap().remove("diagram_views");
+        let migrated = decode(&value.to_string()).unwrap();
+        assert!(migrated.diagram_views.is_empty());
+        assert_eq!(migrated.components[0].id, "c");
+        value["diagram_views"] = serde_json::json!({"e":{"nodes":{"c":{"x":10,"y":20,"locked":true}},"groups":[{"id":"g","name":"Cluster","members":["c"],"x":0,"y":0,"width":400,"height":240}]}});
+        assert!(decode(&value.to_string()).is_ok());
+        value["relationships"] = serde_json::json!([{"id":"__group__g","source_component_id":"c","target_component_id":"c","relation_type":"test","label":""}]);
+        assert!(decode(&value.to_string()).is_err());
+        value["relationships"] = serde_json::json!([]);
+        value["diagram_views"]["e"]["groups"][0]["members"] = serde_json::json!(["c", "c"]);
+        assert!(decode(&value.to_string()).is_err());
+        value["diagram_views"]["e"]["groups"][0]["members"] = serde_json::json!(["missing"]);
+        assert!(decode(&value.to_string()).is_err());
+        value["diagram_views"]["e"]["groups"][0]["members"] = serde_json::json!(["c"]);
+        value["diagram_views"]["e"]["nodes"]["c"]["x"] = serde_json::json!(1e20);
+        assert!(decode(&value.to_string()).is_err());
+    }
     #[test]
     fn rejects_cycles_and_secret_fields() {
         let mut d = Document::default();
